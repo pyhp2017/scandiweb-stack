@@ -19,7 +19,7 @@ sudo groupadd docker &&
 sudo usermod -aG docker ubuntu
 
 # Set MAGENTO_BASE_URL environment variable
-sudo echo "MAGENTO_BASE_URL=${magento_base_url}" >> /etc/environment
+sudo echo "MAGENTO_BASE_URL=${MAGENTO_BASE_URL}" >> /etc/environment
 
 # Run Docker Compose
 sudo docker-compose -f /home/ubuntu/docker-compose.yaml up -d &&

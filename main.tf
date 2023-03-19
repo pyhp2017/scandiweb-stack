@@ -125,7 +125,22 @@ resource "aws_instance" "scandiweb_magento2" {
   subnet_id              = aws_subnet.scandiweb_instance_subnet.id
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
-  user_data              = file("installation/bootstrap.sh.tpl")
+  user_data              = "${data.template_file.init.rendered}"
+
+  # Copy the all the magento config files to the instance
+  provisioner "file" {
+    source      = "installation/magento/"
+    destination = "/home/ubuntu"
+  }
+
+  # Setup connection to the instance
+  connection {
+    type = "ssh"
+    user = "ubuntu"
+    private_key = file("~/.ssh/terratest")
+    host = self.public_ip
+    timeout = "4m"
+  }
 
   root_block_device {
     volume_size = 20
@@ -144,7 +159,7 @@ resource "aws_instance" "scandiweb_varnish" {
   private_ip             = "10.0.1.61" # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
-  user_data              = file("installation/bootstrap.sh.tpl")
+  user_data              = "${data.template_file.init.rendered}"
 
   # Copy the default.vcl file to the instance
   provisioner "file" {

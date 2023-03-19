@@ -21,3 +21,11 @@ data "aws_subnet_ids" "GetSubnet_Ids" {
   }
   depends_on = [aws_subnet.scandiweb_public_subnet1, aws_subnet.scandiweb_public_subnet2]
 }
+
+data "template_file" "init" {
+  template = "${file("${path.module}/installation/bootstrap.sh.tpl")}"
+
+  vars = {
+    MAGENTO_BASE_URL = "${aws_lb.scandiweb_lb.dns_name}"
+  }
+}
