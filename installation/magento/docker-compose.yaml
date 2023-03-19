@@ -1,0 +1,79 @@
+version: '3.9'
+
+services:
+  nginx-webserver:
+    image: nginx:1.23.3-alpine
+    container_name: nginx-webserver
+    ports:
+      - 80:80
+      - 7070:8080
+    volumes:
+      - ./src:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - php-fpm
+      - elastic
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  php-fpm:
+    build:
+      context: ./php
+    container_name: php-fpm
+    env_file:
+      - .env
+    # Get env variable from host machine
+    environment:
+      - MAGENTO_BASE_URL=${MAGENTO_BASE_URL}
+    depends_on:
+      - mysql
+      - elastic
+    volumes:
+      - ./src:/var/www/html
+
+  mysql:
+    build: ./mysql
+    container_name: mysql
+    env_file:
+      - .env
+    ports:
+      - 3306:3306
+    volumes:
+      - database_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  elastic:
+    # https://experienceleague.adobe.com/docs/commerce-operations/installation-guide/prerequisites/search-engine/overview.html?lang=en
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: elastic
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - 9200:9200
+      - 9300:9300
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data
+    ulimits:
+      # https://www.elastic.co/guide/en/elasticsearch/reference/current/docker.html#docker-cli-run-prod-mode
+      memlock:
+        soft: -1
+        hard: -1
+    cap_add:
+      - IPC_LOCK
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+volumes:
+  database_data:
+  elastic_data:
