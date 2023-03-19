@@ -8,16 +8,10 @@ data "aws_ami" "server_ami_ubuntu_22" {
   }
 }
 
-#  data "aws_vpc" "GetVPC" { 
-#   filter {Name = "scandiweb_stack_vpc"} 
-#  } 
-
-
 data "aws_instances" "ec2_list" {
   instance_state_names = ["running"]
   depends_on = [aws_instance.scandiweb_varnish, aws_instance.scandiweb_magento2]
 }
-
 
 data "aws_subnet_ids" "GetSubnet_Ids" {
   vpc_id = aws_vpc.scandiweb_vpc.id
@@ -25,4 +19,5 @@ data "aws_subnet_ids" "GetSubnet_Ids" {
     name   = "tag:Type"
     values = ["public"]
   }
+  depends_on = [aws_subnet.scandiweb_public_subnet1, aws_subnet.scandiweb_public_subnet2]
 }

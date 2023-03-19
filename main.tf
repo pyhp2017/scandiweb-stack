@@ -35,15 +35,16 @@ resource "aws_subnet" "scandiweb_public_subnet2" {
   }
 }
 
-# Create a private subnet for the EC2 instances
-resource "aws_subnet" "scandiweb_private_subnet" {
+# Create a subnet for the EC2 instances
+resource "aws_subnet" "scandiweb_instance_subnet" {
   vpc_id            = aws_vpc.scandiweb_vpc.id
   cidr_block        = "10.0.1.0/24"
   availability_zone = "eu-central-1a"
+  map_public_ip_on_launch = true # better to NOT assign public ip to the instances
 
   tags = {
-    Name = "scandiweb_stack_private_subnet"
-    Type = "private"
+    Name = "scandiweb_stack_instance_subnet"
+    Type = "instance_subnet"
   }
 }
 
@@ -72,16 +73,22 @@ resource "aws_route" "default_route" {
   gateway_id             = aws_internet_gateway.scandiweb_gw.id
 }
 
-# Create association between subnet and route table which will allow to access the internet
+# Create association between subnet and route table which will allow to access the internet (for load balancer)
 resource "aws_route_table_association" "scandiweb_rtassoc1" {
   subnet_id      = aws_subnet.scandiweb_public_subnet1.id
   route_table_id = aws_route_table.scandiweb_route_table.id
 }
+
 resource "aws_route_table_association" "scandiweb_rtassoc2" {
   subnet_id      = aws_subnet.scandiweb_public_subnet2.id
   route_table_id = aws_route_table.scandiweb_route_table.id
 }
 
+# Create association between subnet and route table which will allow to access the internet (for instances)
+resource "aws_route_table_association" "scandiweb_rtassoc3" {
+  subnet_id      = aws_subnet.scandiweb_instance_subnet.id
+  route_table_id = aws_route_table.scandiweb_route_table.id
+}
 
 # Create a security group for the VPC
 resource "aws_security_group" "scandiweb_sg" {
@@ -114,10 +121,11 @@ resource "aws_key_pair" "scandiweb_auth" {
 resource "aws_instance" "scandiweb_magento2" {
   instance_type          = "t2.medium"
   ami                    = data.aws_ami.server_ami_ubuntu_22.id
-  subnet_id              = aws_subnet.scandiweb_private_subnet.id
+  private_ip             = "10.0.1.60" # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
+  subnet_id              = aws_subnet.scandiweb_instance_subnet.id
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
-#   user_data              = file("magento2.sh")s
+  user_data              = file("installation/bootstrap.sh.tpl")
 
   root_block_device {
     volume_size = 20
@@ -132,10 +140,26 @@ resource "aws_instance" "scandiweb_magento2" {
 resource "aws_instance" "scandiweb_varnish" {
   instance_type          = "t2.micro"
   ami                    = data.aws_ami.server_ami_ubuntu_22.id
-  subnet_id              = aws_subnet.scandiweb_private_subnet.id
+  subnet_id              = aws_subnet.scandiweb_instance_subnet.id
+  private_ip             = "10.0.1.61" # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
-#   user_data              = file("varnish.sh")
+  user_data              = file("installation/bootstrap.sh.tpl")
+
+  # Copy the default.vcl file to the instance
+  provisioner "file" {
+    source      = "installation/varnish/"
+    destination = "/home/ubuntu"
+  }
+
+  # Setup connection to the instance
+  connection {
+    type = "ssh"
+    user = "ubuntu"
+    private_key = file("~/.ssh/terratest")
+    host = self.public_ip
+    timeout = "4m"
+  }
 
   root_block_device {
     volume_size = 10
@@ -180,8 +204,9 @@ resource "aws_security_group" "scandiweb_lb_sg" {
 }
 
 # This resource group resources for use so that it can be associated with load balancers.
-resource "aws_lb_target_group" "scandiweb_lb_target_group" {
-  name        = "scandiweb-stack-lb-tg"
+# This target group belongs to the magento2 instance
+resource "aws_lb_target_group" "scandiweb_lb_target_group_magento2" {
+  name        = "scandiweb-stack-lb-tg-magento2"
   port        = 80
   protocol    = "HTTP"
   vpc_id      = aws_vpc.scandiweb_vpc.id
@@ -189,18 +214,40 @@ resource "aws_lb_target_group" "scandiweb_lb_target_group" {
 
   depends_on = [aws_security_group.scandiweb_lb_sg]
 
-  #   health_check {
-  #     path = "/"
-  #   }
+  health_check {
+    path = "/pub/health_check.php"
+  }
 }
 
-# This resource provides us the ability to register containers and instances with load balancers
-resource "aws_lb_target_group_attachment" "scandiweb_lb_target_group_attachment" {
-  count            = length(data.aws_instances.ec2_list.ids)
-  target_group_arn = aws_lb_target_group.scandiweb_lb_target_group.arn
-  target_id        = data.aws_instances.ec2_list.ids[count.index]
+# This target group belongs to the varnish instance
+resource "aws_lb_target_group" "scandiweb_lb_target_group_varnish" {
+  name        = "scandiweb-stack-lb-tg-varnish"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.scandiweb_vpc.id
+  target_type = "instance"
+
+  depends_on = [aws_security_group.scandiweb_lb_sg]
+
+  health_check {
+    path = "/health_check.php"
+  }
+}
+
+# Register the magento2 instance with the target group
+resource "aws_lb_target_group_attachment" "scandiweb_lb_target_group_attachment_magento2" {
+  target_group_arn = aws_lb_target_group.scandiweb_lb_target_group_magento2.arn
+  target_id        = aws_instance.scandiweb_magento2.id
   port             = 80
-  depends_on       = [aws_lb_target_group.scandiweb_lb_target_group]
+  depends_on       = [aws_lb_target_group.scandiweb_lb_target_group_magento2]
+}
+
+# Register the varnish instance with the target group
+resource "aws_lb_target_group_attachment" "scandiweb_lb_target_group_attachment_varnish" {
+  target_group_arn = aws_lb_target_group.scandiweb_lb_target_group_varnish.arn
+  target_id        = aws_instance.scandiweb_varnish.id
+  port             = 80
+  depends_on       = [aws_lb_target_group.scandiweb_lb_target_group_varnish]
 }
 
 # This resource is used to create a load balancer that helps us distribute our traffic.
@@ -218,7 +265,7 @@ resource "aws_lb" "scandiweb_lb" {
   }
 }
 
-# This resource is used to create a listener for the load balancer.
+# Create a listener for the load balancer to forward the traffic varnish instance (by default)
 resource "aws_lb_listener" "scandiweb_lb_listener" {
   load_balancer_arn = aws_lb.scandiweb_lb.arn
   port              = "80"
@@ -226,12 +273,9 @@ resource "aws_lb_listener" "scandiweb_lb_listener" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.scandiweb_lb_target_group.arn
+    target_group_arn = aws_lb_target_group.scandiweb_lb_target_group_varnish.arn
   }
-
-  depends_on = [aws_lb_target_group_attachment.scandiweb_lb_target_group_attachment]
 }
-
 
 # Create a rule for the listener to forward the traffic to the magento2 instance
 resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule_magento2" {
@@ -240,7 +284,7 @@ resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule_magento2" {
 
   action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.scandiweb_lb_target_group.arn
+    target_group_arn = aws_lb_target_group.scandiweb_lb_target_group_magento2.arn
   }
 
   condition {
@@ -250,67 +294,3 @@ resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule_magento2" {
   }
 }
 
-# Create a rule for the listener to forward the traffic to the varnish instance
-resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule" {
-  listener_arn = aws_lb_listener.scandiweb_lb_listener.arn
-  priority     = 101
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.scandiweb_lb_target_group.arn
-  }
-
-  condition {
-    path_pattern {
-       values = ["/*"]
-    }
-  }
-}
-
-
-
-
-# Create a load balancer
-# The entry point to the infrastructure will be AWS load-balancer, which will be terminating SSL and taking care of correct routing.
-# The load-balancer will be placed in the public subnet and will have a public IP address.
-# The load-balancer will be configured to forward all traffic to the private subnet where the EC2 instances will be placed.
-# The load-balancer will send all the requests of /media/* and /static/* to the magento2 instance directly and the rest of the requests will be forwarded to the varnish instance.
-# The load-balancer will be configured to use the health checks to check the status of the varnish instance and the magento2 instance.
-
-
-# # Create a listener for the load balancer
-# resource "aws_lb_listener" "scandiweb_lb_listener" {
-#   load_balancer_arn = aws_lb.scandiweb_lb.arn
-#   port              = "443"
-#   protocol          = "HTTPS"
-
-#   default_action {
-#     target_group_arn = aws_lb_target_group.scandiweb_varnish_tg.arn
-#     type             = "forward"
-#   }
-
-#   certificate_arn = "arn:aws:acm:eu-central-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
-
-#   depends_on = [
-#     aws_lb_target_group.scandiweb_varnish_tg,
-#     aws_lb_target_group.scandiweb_magento2_tg
-#   ]
-# }
-
-# Create a rule for the listener
-# resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule" {
-#   listener_arn = aws_lb_listener.scandiweb_lb_listener.arn
-#   priority     = 1
-
-#   action {
-#     type             = "forward"
-#     target_group_arn = aws_lb_target_group.scandiweb_magento2_tg.arn
-#   }
-
-#   condition {
-#     field  = "path-pattern"
-#     values = ["/media/*", "/static/*"]
-#   }
-# }
-
-# # Create a listener
