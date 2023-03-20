@@ -29,6 +29,7 @@ bin/magento setup:install \
 	--elasticsearch-timeout=15
 
 # Disable Magento TwoFactorAuth
+bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth
 bin/magento module:disable Magento_TwoFactorAuth
 
 # Create the Commerce crontab
