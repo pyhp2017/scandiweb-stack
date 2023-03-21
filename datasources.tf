@@ -10,7 +10,7 @@ data "aws_ami" "server_ami_ubuntu_22" {
 
 data "aws_instances" "ec2_list" {
   instance_state_names = ["running"]
-  depends_on = [aws_instance.scandiweb_varnish, aws_instance.scandiweb_magento2]
+  depends_on           = [aws_instance.scandiweb_varnish, aws_instance.scandiweb_magento2]
 }
 
 data "aws_subnet_ids" "GetSubnet_Ids" {
@@ -23,9 +23,9 @@ data "aws_subnet_ids" "GetSubnet_Ids" {
 }
 
 data "template_file" "init" {
-  template = "${file("${path.module}/installation/bootstrap.sh.tpl")}"
+  template = file("${path.module}/installation/bootstrap.sh.tpl")
 
   vars = {
-    MAGENTO_BASE_URL = "${aws_lb.scandiweb_lb.dns_name}"
+    MAGENTO_BASE_URL = format("http://%s", aws_route53_zone.scandiweb_zone.name)
   }
 }
