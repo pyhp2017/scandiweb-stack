@@ -230,7 +230,7 @@ resource "aws_lb_target_group" "scandiweb_lb_target_group_magento2" {
   depends_on = [aws_security_group.scandiweb_lb_sg]
 
   health_check {
-    path = "/pub/health_check.php"
+    path = "/health_check.php"
   }
 }
 
