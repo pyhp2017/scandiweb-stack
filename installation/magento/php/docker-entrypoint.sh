@@ -32,12 +32,14 @@ bin/magento setup:install \
 bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth
 bin/magento module:disable Magento_TwoFactorAuth
 
+# Enable varnish cache
+bin/magento config:set --scope=default --scope-code=0 system/full_page_cache/caching_application 2
+
 # Create the Commerce crontab
 bin/magento cron:install
 
 # Run cron
 bin/magento cron:run
-
 
 # Set read-write permissions for the web server group before you install the application
 find var generated vendor pub/static pub/media app/etc -type f -exec chmod g+w {} + && \
