@@ -8,11 +8,9 @@ services:
       - 80:80
     volumes:
       - ./default.vcl:/etc/varnish/default.vcl
-      - ./varnish.sh:/etc/varnish/varnish.sh
     environment:
       VARNISH_STORAGE: malloc,256m
       VARNISH_TTL: 120
       VARNISH_VCL_CONF: /etc/varnish/default.vcl
       VARNISHD_PARAMS: -p default_ttl=120 -p default_grace=3600
-    command: sh -c "/etc/varnish/varnish.sh"
     restart: unless-stopped
