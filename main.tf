@@ -280,11 +280,66 @@ resource "aws_lb" "scandiweb_lb" {
   }
 }
 
-# Create a listener for the load balancer to forward the traffic varnish instance (by default)
-resource "aws_lb_listener" "scandiweb_lb_listener" {
+# tls private key for the load balancer
+resource "tls_private_key" "private_key" {
+  algorithm = "RSA"
+}
+
+# acme register for the load balancer based on dns challenge
+resource "acme_registration" "cert_registration" {
+  account_key_pem = tls_private_key.private_key.private_key_pem
+  email_address   = "ahmad.foroughi@edu.rtu.lv"
+}
+
+# acme certificate for the load balancer created by the acme register
+resource "acme_certificate" "scandiweb_acm_cert" {
+  account_key_pem           = acme_registration.cert_registration.account_key_pem
+  common_name               = "www.nowruz.me"
+  subject_alternative_names = ["www2.nowruz.me", "nowruz.me"]
+  recursive_nameservers = ["8.8.8.8:53", "1.1.1.1:53"]
+  depends_on                = [acme_registration.cert_registration]
+
+  dns_challenge {
+    provider = "route53"
+    config = {
+      shared_credentials_files = "~/.aws/credentials"
+      AWS_REGION            = var.aws_region
+      AWS_HOSTED_ZONE_ID    = data.aws_route53_zone.scandiweb_zone.zone_id
+    }
+  }
+}
+
+# acm certificate for the load balancer (save it in the aws)
+resource "aws_acm_certificate" "scandiweb_certificate" {
+  certificate_body = acme_certificate.scandiweb_acm_cert.certificate_pem
+  private_key      = acme_certificate.scandiweb_acm_cert.private_key_pem
+  certificate_chain = acme_certificate.scandiweb_acm_cert.issuer_pem
+}
+
+# Create a listener (http) for the load balancer to redirect to https (ssl)
+resource "aws_lb_listener" "scandiweb_lb_http_listener" {
   load_balancer_arn = aws_lb.scandiweb_lb.arn
-  port              = "80"
-  protocol          = "HTTP"
+  port             = "80"
+  protocol         = "HTTP"
+
+  default_action {
+    type             = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+# Create a listener (ssl) for the load balancer to forward the traffic to the varnish instance
+resource "aws_lb_listener" "scandiweb_lb_https_listener" {
+  load_balancer_arn = aws_lb.scandiweb_lb.arn
+  port             = "443"
+  protocol         = "HTTPS"
+  ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn = aws_acm_certificate.scandiweb_certificate.arn
+  
 
   default_action {
     type             = "forward"
@@ -292,9 +347,15 @@ resource "aws_lb_listener" "scandiweb_lb_listener" {
   }
 }
 
+# Attach certificate to the listener
+resource "aws_lb_listener_certificate" "scandiweb_lb_listener_certificate" {
+  listener_arn    = aws_lb_listener.scandiweb_lb_https_listener.arn
+  certificate_arn = aws_acm_certificate.scandiweb_certificate.arn
+}
+
 # Create a rule for the listener to forward the traffic to the magento2 instance
 resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule_magento2" {
-  listener_arn = aws_lb_listener.scandiweb_lb_listener.arn
+  listener_arn = aws_lb_listener.scandiweb_lb_https_listener.arn
   priority     = 100
 
   action {
@@ -309,15 +370,10 @@ resource "aws_lb_listener_rule" "scandiweb_lb_listener_rule_magento2" {
   }
 }
 
-# Create a resource for domain zone
-resource "aws_route53_zone" "scandiweb_zone" {
-  name = "nowruz.me" # Change this to your domain name
-}
-
 # Create a resource for domain record which will be used to point to the load balancer
 resource "aws_route53_record" "scandiweb_record" {
-  zone_id = aws_route53_zone.scandiweb_zone.zone_id
-  name    = aws_route53_zone.scandiweb_zone.name
+  zone_id = data.aws_route53_zone.scandiweb_zone.zone_id
+  name    = data.aws_route53_zone.scandiweb_zone.name
   type    = "A"
 
   alias {

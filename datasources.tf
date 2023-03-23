@@ -26,6 +26,11 @@ data "template_file" "init" {
   template = file("${path.module}/installation/bootstrap.sh.tpl")
 
   vars = {
-    MAGENTO_BASE_URL = format("http://%s", aws_route53_zone.scandiweb_zone.name)
+    MAGENTO_BASE_URL = format("https://%s", data.aws_route53_zone.scandiweb_zone.name)
   }
+}
+
+data "aws_route53_zone" "scandiweb_zone" {
+  name         = "nowruz.me"
+  private_zone = false
 }
