@@ -114,14 +114,15 @@ resource "aws_security_group" "scandiweb_sg" {
 # Create a key pair for the instances
 resource "aws_key_pair" "scandiweb_auth" {
   key_name   = "scandiweb_stack_auth"
-  public_key = file("~/.ssh/terratest.pub")
+  public_key = var.servers_public_key
 }
 
 # Create a magento2 instance
 resource "aws_instance" "scandiweb_magento2" {
   instance_type          = "t2.medium"
   ami                    = data.aws_ami.server_ami_ubuntu_22.id
-  private_ip             = "10.0.1.60" # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
+  private_ip             = var.magento2_private_ip # Assign a private ip to the instance (it is better to use another method - 
+  # i didn't find a way to do it)
   subnet_id              = aws_subnet.scandiweb_instance_subnet.id
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
@@ -137,7 +138,7 @@ resource "aws_instance" "scandiweb_magento2" {
   connection {
     type        = "ssh"
     user        = "ubuntu"
-    private_key = file("~/.ssh/terratest")
+    private_key = file(var.servers_private_key_path)
     host        = self.public_ip
     timeout     = "4m"
   }
@@ -156,7 +157,7 @@ resource "aws_instance" "scandiweb_varnish" {
   instance_type          = "t2.micro"
   ami                    = data.aws_ami.server_ami_ubuntu_22.id
   subnet_id              = aws_subnet.scandiweb_instance_subnet.id
-  private_ip             = "10.0.1.61" # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
+  private_ip             = var.varnish_private_ip # Assign a private ip to the instance (Hardcoded for now - needs to be changed)
   vpc_security_group_ids = [aws_security_group.scandiweb_sg.id]
   key_name               = aws_key_pair.scandiweb_auth.key_name
   user_data              = data.template_file.init.rendered
@@ -171,7 +172,7 @@ resource "aws_instance" "scandiweb_varnish" {
   connection {
     type        = "ssh"
     user        = "ubuntu"
-    private_key = file("~/.ssh/terratest")
+    private_key = file(var.servers_private_key_path)
     host        = self.public_ip
     timeout     = "4m"
   }
@@ -288,7 +289,7 @@ resource "tls_private_key" "private_key" {
 # acme register for the load balancer based on dns challenge
 resource "acme_registration" "cert_registration" {
   account_key_pem = tls_private_key.private_key.private_key_pem
-  email_address   = "ahmad.foroughi@edu.rtu.lv"
+  email_address   = var.acme_registration_email
 }
 
 # acme certificate for the load balancer created by the acme register
